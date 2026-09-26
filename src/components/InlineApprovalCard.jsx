@@ -2,9 +2,33 @@ import React from 'react';
 import { FiShield } from 'react-icons/fi';
 import SafeIcon from '../common/SafeIcon';
 import { supabase } from '../lib/supabase';
+import { tunnelRegistry } from '../services/agentTunnels';
 
 export default function InlineApprovalCard({ approvalId, department, title, summary, initialStatus = 'Pending' }) {
   const [status, setStatus] = React.useState(initialStatus);
+
+  const dispatchToTunnel = async (resolvedStatus) => {
+    const roleMap = {
+      'CEO': 'ceo',
+      'COO': 'coo',
+      'CTO': 'cto',
+      'CFO': 'cfo'
+    };
+    const roleKey = roleMap[department] || 'ceo';
+    const tunnel = tunnelRegistry.getTunnel(roleKey);
+
+    if (tunnel) {
+      try {
+        await tunnel.dispatchWebhookCallback({
+          action_id: approvalId,
+          status: resolvedStatus,
+          timestamp: new Date().toISOString()
+        });
+      } catch (err) {
+        console.warn('Failed to dispatch webhook callback to tunnel:', err);
+      }
+    }
+  };
 
   const handleApprove = async () => {
     try {
@@ -14,6 +38,16 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
       });
       if (error) throw error;
       setStatus('Approved');
+
+      // Log execution confirmation
+      await supabase.from('action_approvals_log').insert([{
+        action_id: approvalId,
+        department: department,
+        status: 'Approved',
+        executed_at: new Date().toISOString()
+      }]);
+
+      await dispatchToTunnel('Approved');
     } catch (err) {
       console.error('Failed to approve action:', err);
     }
@@ -27,6 +61,16 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
       });
       if (error) throw error;
       setStatus('Rejected');
+
+      // Log execution confirmation
+      await supabase.from('action_approvals_log').insert([{
+        action_id: approvalId,
+        department: department,
+        status: 'Rejected',
+        executed_at: new Date().toISOString()
+      }]);
+
+      await dispatchToTunnel('Rejected');
     } catch (err) {
       console.error('Failed to reject action:', err);
     }
