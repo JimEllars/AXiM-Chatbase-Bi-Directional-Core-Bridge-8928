@@ -17,10 +17,16 @@ export async function dispatchAgentMessage(agentRole, messagePayload, contextMet
   const agentConfig = getAgent(agentRole);
 
   let conversationId = contextMetadata.conversationId;
-  const convKey = `axim.chatbase.conversation.${agentRole}`;
+    const convKey = `axim.chatbase.conversation.${agentRole}`;
 
   if (!conversationId) {
     conversationId = sessionStorage.getItem(convKey);
+  }
+
+  // Use agentTunnel queue if disconnected
+  if (tunnel && tunnel.status === 'disconnected') {
+      tunnel.queueMessage({ ...messagePayload, conversationId });
+      return { status: 'queued', message: 'Message queued pending reconnection.' };
   }
 
   try {

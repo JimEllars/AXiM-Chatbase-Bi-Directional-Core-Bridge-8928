@@ -5,7 +5,9 @@ import { supabase } from '../lib/supabase';
 import { tunnelRegistry } from '../services/agentTunnels';
 
 export default function InlineApprovalCard({ approvalId, department, title, summary, initialStatus = 'Pending' }) {
-  const [status, setStatus] = React.useState(initialStatus);
+    const [status, setStatus] = React.useState(initialStatus);
+  const [isProcessing, setIsProcessing] = React.useState(false);
+  const [errorBanner, setErrorBanner] = React.useState(null);
 
   const dispatchToTunnel = async (resolvedStatus) => {
     const roleMap = {
@@ -30,7 +32,10 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
     }
   };
 
+
   const handleApprove = async () => {
+    setIsProcessing(true);
+    setErrorBanner(null);
     try {
       const { error } = await supabase.rpc('resolve_hitl_action_rpc', {
         p_action_id: approvalId,
@@ -39,7 +44,6 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
       if (error) throw error;
       setStatus('Approved');
 
-      // Log execution confirmation
       await supabase.from('action_approvals_log').insert([{
         action_id: approvalId,
         department: department,
@@ -50,10 +54,17 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
       await dispatchToTunnel('Approved');
     } catch (err) {
       console.error('Failed to approve action:', err);
+      setErrorBanner('Failed to approve.');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
+
+
   const handleReject = async () => {
+    setIsProcessing(true);
+    setErrorBanner(null);
     try {
       const { error } = await supabase.rpc('resolve_hitl_action_rpc', {
         p_action_id: approvalId,
@@ -62,7 +73,6 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
       if (error) throw error;
       setStatus('Rejected');
 
-      // Log execution confirmation
       await supabase.from('action_approvals_log').insert([{
         action_id: approvalId,
         department: department,
@@ -73,25 +83,41 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
       await dispatchToTunnel('Rejected');
     } catch (err) {
       console.error('Failed to reject action:', err);
+      setErrorBanner('Failed to reject.');
+    } finally {
+      setIsProcessing(false);
     }
   };
+
 
   return (
     <div className={`approval-card inline-card ${status === 'Approved' ? 'approved' : status === 'Rejected' ? 'rejected' : ''}`}>
       <div className={`approval-icon ${status === 'Pending' ? 'amber' : status === 'Approved' ? 'emerald' : 'red'}`}>
         <SafeIcon icon={FiShield} />
       </div>
+
       <div className="card-content">
         <strong>Action Approval Required &middot; {department}</strong>
         <span>{title}</span>
         {summary && <p className="text-sm mt-1">{summary}</p>}
+        {errorBanner && <p className="text-sm mt-1 text-red-500 font-semibold">{errorBanner}</p>}
       </div>
       {status === 'Pending' ? (
         <div className="approval-actions">
-          <button className="review-button" onClick={handleApprove}>Approve & Execute</button>
-          <button className="review-button reject" onClick={handleReject}>Reject</button>
+          {isProcessing ? (
+             <div className="text-sm text-slate-400 flex items-center gap-2 px-4 py-1">
+                 <span className="animate-spin inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full"></span>
+                 Processing...
+             </div>
+          ) : (
+             <>
+                 <button className="review-button" onClick={handleApprove}>Approve & Execute</button>
+                 <button className="review-button reject" onClick={handleReject}>Reject</button>
+             </>
+          )}
         </div>
       ) : (
+
         <span className="approval-status font-semibold ml-auto">{status}</span>
       )}
     </div>

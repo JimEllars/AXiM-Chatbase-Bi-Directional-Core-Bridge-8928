@@ -5,25 +5,49 @@ import { supabase } from '../lib/supabase';
 import { tunnelRegistry } from '../services/agentTunnels';
 
 export default function PendingApprovalsDrawer({ isOpen, onClose }) {
-  const [approvals, setApprovals] = useState([]);
+    const [approvals, setApprovals] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [processingId, setProcessingId] = useState(null);
+  const [errorBanner, setErrorBanner] = useState(null);
+
 
   useEffect(() => {
     if (isOpen) {
+      // Hydrate from cache first
+      try {
+        const cached = localStorage.getItem('axim.approvals.cache');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          // check TTL (30 min)
+          if (Date.now() - parsed.timestamp < 30 * 60 * 1000) {
+            setApprovals(parsed.data || []);
+          }
+        }
+      } catch (e) {
+         console.warn('Failed to parse cached approvals');
+      }
       fetchApprovals();
     }
   }, [isOpen]);
+
 
   const fetchApprovals = async () => {
     setLoading(true);
     try {
       // Fetching from supabase using the RPC function mentioned in instructions
+
       const { data, error } = await supabase.rpc('get_pending_approvals');
       if (error) {
         console.error('Error fetching pending approvals:', error);
       } else {
-        setApprovals(data || []);
+        const approvalData = data || [];
+        setApprovals(approvalData);
+        localStorage.setItem('axim.approvals.cache', JSON.stringify({
+            timestamp: Date.now(),
+            data: approvalData
+        }));
       }
+
     } catch (err) {
       console.error('Failed to fetch approvals:', err);
     } finally {
@@ -54,7 +78,22 @@ export default function PendingApprovalsDrawer({ isOpen, onClose }) {
     }
   };
 
+
   const handleAction = async (id, department, status) => {
+    setProcessingId(id);
+    setErrorBanner(null);
+
+    // Cache the old list for rollback
+    const previousApprovals = [...approvals];
+
+    // Optimistically update the list
+    const updatedApprovals = approvals.filter(app => app.id !== id);
+    setApprovals(updatedApprovals);
+    localStorage.setItem('axim.approvals.cache', JSON.stringify({
+        timestamp: Date.now(),
+        data: updatedApprovals
+    }));
+
     try {
       const { error } = await supabase.rpc('resolve_hitl_action_rpc', {
         p_action_id: id,
@@ -62,9 +101,8 @@ export default function PendingApprovalsDrawer({ isOpen, onClose }) {
       });
 
       if (error) {
-        console.error(`Error updating approval ${id}:`, error);
+        throw error;
       } else {
-        // Log execution confirmation
         await supabase.from('action_approvals_log').insert([{
           action_id: id,
           department: department,
@@ -73,14 +111,21 @@ export default function PendingApprovalsDrawer({ isOpen, onClose }) {
         }]);
 
         await dispatchToTunnel(id, department, status);
-
-        // Optimistically update the local list
-        setApprovals(prev => prev.filter(app => app.id !== id));
       }
     } catch (err) {
       console.error(`Failed to update approval ${id}:`, err);
+      // Revert optimistic update
+      setApprovals(previousApprovals);
+      localStorage.setItem('axim.approvals.cache', JSON.stringify({
+          timestamp: Date.now(),
+          data: previousApprovals
+      }));
+      setErrorBanner(`Failed to execute ${status} for action.`);
+    } finally {
+      setProcessingId(null);
     }
   };
+
 
   if (!isOpen) return null;
 
@@ -98,8 +143,16 @@ export default function PendingApprovalsDrawer({ isOpen, onClose }) {
           </button>
         </div>
 
+
         <div className="drawer-content">
-          {loading ? (
+          {errorBanner && (
+            <div className="bg-red-500 text-white p-2 mb-4 rounded flex items-center gap-2 text-sm">
+                <SafeIcon icon={FiAlertTriangle} />
+                {errorBanner}
+            </div>
+          )}
+          {loading && approvals.length === 0 ? (
+
             <div className="drawer-loading">Loading approvals...</div>
           ) : approvals.length === 0 ? (
             <div className="drawer-empty">
@@ -118,20 +171,31 @@ export default function PendingApprovalsDrawer({ isOpen, onClose }) {
                   <div className="drawer-card-detail">
                     {approval.justification || approval.detail || JSON.stringify(approval.parameters)}
                   </div>
+
                   <div className="drawer-card-actions">
-                    <button
-                      className="btn-approve"
-                      onClick={() => handleAction(approval.id, approval.department || 'SYSTEM', 'Approved')}
-                    >
-                      Approve & Execute
-                    </button>
-                    <button
-                      className="btn-reject"
-                      onClick={() => handleAction(approval.id, approval.department || 'SYSTEM', 'Rejected')}
-                    >
-                      Reject
-                    </button>
+                    {processingId === approval.id ? (
+                        <div className="text-sm text-slate-400 flex items-center gap-2">
+                           <span className="animate-spin inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full"></span>
+                           Processing...
+                        </div>
+                    ) : (
+                        <>
+                            <button
+                              className="btn-approve"
+                              onClick={() => handleAction(approval.id, approval.department || 'SYSTEM', 'Approved')}
+                            >
+                              Approve & Execute
+                            </button>
+                            <button
+                              className="btn-reject"
+                              onClick={() => handleAction(approval.id, approval.department || 'SYSTEM', 'Rejected')}
+                            >
+                              Reject
+                            </button>
+                        </>
+                    )}
                   </div>
+
                 </div>
               ))}
             </div>

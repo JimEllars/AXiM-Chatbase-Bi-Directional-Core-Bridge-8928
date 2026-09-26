@@ -7,6 +7,8 @@ import { getPassportSession } from '../lib/auth';
 export default function TelemetryBar({ creditsUsed, conversationId, pendingCount, onOpenApprovals }) {
   const [latency, setLatency] = useState(0);
   const [tunnelStatus, setTunnelStatus] = useState('disconnected');
+  const [bufferCount, setBufferCount] = useState(0);
+  const [activeTunnels, setActiveTunnels] = useState(0);
   const animationRef = useRef();
 
   useEffect(() => {
@@ -24,10 +26,10 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
         const tunnels = tunnelRegistry.getAllTunnels();
 
         if (tunnels.length > 0) {
-          // Calculate average latency among polling tunnels
           let totalLatency = 0;
           let validCount = 0;
           let worstStatus = 'connected';
+          let totalBufferCount = 0;
 
           tunnels.forEach(t => {
             if (t.latency > 0) {
@@ -35,19 +37,27 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
               validCount++;
             }
 
-            // Determine worst global status
             if (t.status === 'disconnected') worstStatus = 'disconnected';
             else if (t.status === 'degraded' && worstStatus !== 'disconnected') worstStatus = 'degraded';
             else if (t.status === 'polling' && worstStatus === 'connected') worstStatus = 'polling';
+
+            if (t.messageQueue && t.messageQueue.length > 0) {
+              totalBufferCount += t.messageQueue.length;
+            }
           });
 
-          if (validCount > 0) {
-             setLatency(Math.floor(totalLatency / validCount));
-          } else {
-             setLatency(0);
+          let avgLatency = validCount > 0 ? Math.floor(totalLatency / validCount) : 0;
+          setLatency(avgLatency);
+
+          if (avgLatency >= 120 || totalBufferCount > 0) {
+            if (worstStatus === 'connected' || worstStatus === 'polling') {
+                worstStatus = 'degraded';
+            }
           }
 
           setTunnelStatus(worstStatus);
+          setBufferCount(totalBufferCount);
+          setActiveTunnels(tunnels.filter(t => t.status === 'connected' || t.status === 'degraded' || t.status === 'polling').length);
         }
       }
 
@@ -87,13 +97,13 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
       <div className="telemetry-group">
         <div className="telemetry-item">
           <span className={`live-pulse ${tunnelStatus === 'connected' ? 'bg-green-500' : tunnelStatus === 'degraded' ? 'bg-amber-500' : 'bg-red-500'}`}></span>
-          <span>Core Edge Uplink</span>
+          <span>Core Edge Uplink {activeTunnels > 0 ? `(${activeTunnels} active)` : ''}</span>
           <strong className="font-mono">{latency > 0 ? `${latency}ms` : '---'}</strong>
         </div>
         <div className="telemetry-divider"></div>
         <div className="telemetry-item">
           <SafeIcon icon={statusInfo.icon} className={statusInfo.color} />
-          <span>Chatbase API v2 · {statusInfo.label}</span>
+          <span>Chatbase API v2 · {statusInfo.label} {bufferCount > 0 ? ` (${bufferCount} queued)` : ''}</span>
         </div>
       </div>
 
