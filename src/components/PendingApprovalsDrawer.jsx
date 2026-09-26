@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FiX, FiShield, FiAlertTriangle, FiCheck } from 'react-icons/fi';
 import SafeIcon from '../common/SafeIcon';
 import { supabase } from '../lib/supabase';
+import { tunnelRegistry } from '../services/agentTunnels';
 
 export default function PendingApprovalsDrawer({ isOpen, onClose }) {
   const [approvals, setApprovals] = useState([]);
@@ -30,7 +31,30 @@ export default function PendingApprovalsDrawer({ isOpen, onClose }) {
     }
   };
 
-  const handleAction = async (id, status) => {
+  const dispatchToTunnel = async (approvalId, department, resolvedStatus) => {
+    const roleMap = {
+      'CEO': 'ceo',
+      'COO': 'coo',
+      'CTO': 'cto',
+      'CFO': 'cfo'
+    };
+    const roleKey = roleMap[department] || 'ceo';
+    const tunnel = tunnelRegistry.getTunnel(roleKey);
+
+    if (tunnel) {
+      try {
+        await tunnel.dispatchWebhookCallback({
+          action_id: approvalId,
+          status: resolvedStatus,
+          timestamp: new Date().toISOString()
+        });
+      } catch (err) {
+        console.warn('Failed to dispatch webhook callback to tunnel:', err);
+      }
+    }
+  };
+
+  const handleAction = async (id, department, status) => {
     try {
       const { error } = await supabase.rpc('resolve_hitl_action_rpc', {
         p_action_id: id,
@@ -40,6 +64,16 @@ export default function PendingApprovalsDrawer({ isOpen, onClose }) {
       if (error) {
         console.error(`Error updating approval ${id}:`, error);
       } else {
+        // Log execution confirmation
+        await supabase.from('action_approvals_log').insert([{
+          action_id: id,
+          department: department,
+          status: status,
+          executed_at: new Date().toISOString()
+        }]);
+
+        await dispatchToTunnel(id, department, status);
+
         // Optimistically update the local list
         setApprovals(prev => prev.filter(app => app.id !== id));
       }
@@ -87,13 +121,13 @@ export default function PendingApprovalsDrawer({ isOpen, onClose }) {
                   <div className="drawer-card-actions">
                     <button
                       className="btn-approve"
-                      onClick={() => handleAction(approval.id, 'Approved')}
+                      onClick={() => handleAction(approval.id, approval.department || 'SYSTEM', 'Approved')}
                     >
                       Approve & Execute
                     </button>
                     <button
                       className="btn-reject"
-                      onClick={() => handleAction(approval.id, 'Rejected')}
+                      onClick={() => handleAction(approval.id, approval.department || 'SYSTEM', 'Rejected')}
                     >
                       Reject
                     </button>

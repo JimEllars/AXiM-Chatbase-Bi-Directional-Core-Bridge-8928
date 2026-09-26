@@ -12,9 +12,22 @@ export function getPassportSession() {
     // }).join(''));
     // const profile = JSON.parse(jsonPayload);
 
+    // If needed we can trigger an asynchronous check/refresh with the Passport API here
+    // based on parsed expiration, but for now returning it acts as a "ping" requirement.
     return { access_token: token, profile: {} };
   } catch (error) {
     console.error('Failed to parse axim_session cookie', error);
     return null;
   }
+}
+
+export async function pingTokenRefresh() {
+    // Implement token refresh cycle if necessary, currently placeholder.
+    // Heavy agent polling loops will call getPassportSession, which acts as a minimal check.
+    const session = getPassportSession();
+    if (!session) {
+        // Trigger re-auth flow if strict session is lost
+        console.warn('Session missing during active polling cycle.');
+    }
+    return session !== null;
 }

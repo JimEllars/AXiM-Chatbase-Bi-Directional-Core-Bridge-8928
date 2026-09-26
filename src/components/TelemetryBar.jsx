@@ -1,27 +1,66 @@
-import React, { useState, useEffect } from 'react';
-import { FiCheckCircle, FiCopy, FiServer, FiShield, FiZap } from 'react-icons/fi';
+import React, { useState, useEffect, useRef } from 'react';
+import { FiCheckCircle, FiCopy, FiServer, FiShield, FiZap, FiAlertTriangle, FiXCircle } from 'react-icons/fi';
 import SafeIcon from '../common/SafeIcon';
+import { tunnelRegistry } from '../services/agentTunnels';
+import { getPassportSession } from '../lib/auth';
 
 export default function TelemetryBar({ creditsUsed, conversationId, pendingCount, onOpenApprovals }) {
   const [latency, setLatency] = useState(0);
+  const [tunnelStatus, setTunnelStatus] = useState('disconnected');
+  const animationRef = useRef();
 
   useEffect(() => {
-    const measureLatency = async () => {
-      const start = performance.now();
-      try {
-        // Just pinging an endpoint or using an arbitrary number for telemetry mockup
-        // if core.axim.us.com isn't reachable from client easily without auth, we simulate or measure connect
-        await fetch('https://core.axim.us.com/health', { mode: 'no-cors' }).catch(() => {});
-        const end = performance.now();
-        setLatency(Math.floor(end - start));
-      } catch {
-        setLatency(Math.floor(Math.random() * 50) + 20); // fallback simulation
+    let lastUpdate = 0;
+    const pollingInterval = 1000; // Update UI every 1s
+
+    const updateTelemetry = (timestamp) => {
+      if (timestamp - lastUpdate > pollingInterval) {
+        lastUpdate = timestamp;
+
+        // Ensure tokens are fresh for polling if needed
+        // (In a real app, calling getPassportSession might trigger a refresh if expired)
+        getPassportSession();
+
+        const tunnels = tunnelRegistry.getAllTunnels();
+
+        if (tunnels.length > 0) {
+          // Calculate average latency among polling tunnels
+          let totalLatency = 0;
+          let validCount = 0;
+          let worstStatus = 'connected';
+
+          tunnels.forEach(t => {
+            if (t.latency > 0) {
+              totalLatency += t.latency;
+              validCount++;
+            }
+
+            // Determine worst global status
+            if (t.status === 'disconnected') worstStatus = 'disconnected';
+            else if (t.status === 'degraded' && worstStatus !== 'disconnected') worstStatus = 'degraded';
+            else if (t.status === 'polling' && worstStatus === 'connected') worstStatus = 'polling';
+          });
+
+          if (validCount > 0) {
+             setLatency(Math.floor(totalLatency / validCount));
+          } else {
+             setLatency(0);
+          }
+
+          setTunnelStatus(worstStatus);
+        }
       }
+
+      animationRef.current = requestAnimationFrame(updateTelemetry);
     };
 
-    measureLatency();
-    const interval = setInterval(measureLatency, 5000);
-    return () => clearInterval(interval);
+    animationRef.current = requestAnimationFrame(updateTelemetry);
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
   }, []);
 
   const handleCopy = () => {
@@ -32,18 +71,29 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
 
   const shortConvId = conversationId ? conversationId.substring(0, 8) : '--------';
 
+  const getStatusIcon = () => {
+    switch (tunnelStatus) {
+      case 'connected': return { icon: FiCheckCircle, color: 'text-green-400', label: 'Verified' };
+      case 'degraded': return { icon: FiAlertTriangle, color: 'text-amber-400', label: 'Degraded' };
+      case 'polling': return { icon: FiZap, color: 'text-blue-400', label: 'Polling' };
+      default: return { icon: FiXCircle, color: 'text-red-400', label: 'Disconnected' };
+    }
+  };
+
+  const statusInfo = getStatusIcon();
+
   return (
     <div className="telemetry-bar">
       <div className="telemetry-group">
         <div className="telemetry-item">
-          <span className="live-pulse"></span>
+          <span className={`live-pulse ${tunnelStatus === 'connected' ? 'bg-green-500' : tunnelStatus === 'degraded' ? 'bg-amber-500' : 'bg-red-500'}`}></span>
           <span>Core Edge Uplink</span>
-          <strong className="font-mono">{latency}ms</strong>
+          <strong className="font-mono">{latency > 0 ? `${latency}ms` : '---'}</strong>
         </div>
         <div className="telemetry-divider"></div>
         <div className="telemetry-item">
-          <SafeIcon icon={FiServer} className="text-green-400" />
-          <span>Chatbase API v2 · Verified</span>
+          <SafeIcon icon={statusInfo.icon} className={statusInfo.color} />
+          <span>Chatbase API v2 · {statusInfo.label}</span>
         </div>
       </div>
 
