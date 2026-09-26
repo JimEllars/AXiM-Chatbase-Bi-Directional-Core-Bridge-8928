@@ -17,16 +17,11 @@ import {
   FiZap
 } from 'react-icons/fi';
 import SafeIcon from './common/SafeIcon';
-import {
-  agents,
-  appendConversation,
-  getAgent,
-  getConversation,
-  loadBridgeState,
-  resetConversation,
-  updateApproval
-} from './services/localBridge';
+import { agents, getAgent, getConversation, loadBridgeState, resetConversation, updateApproval } from './services/localBridge';
 import './App.css';
+import { getPassportSession } from './lib/auth';
+import { sendChatMessage } from './services/bridgeClient';
+import InlineApprovalCard from './components/InlineApprovalCard';
 
 function Sidebar({ active, onNavigate, pendingCount }) {
   const items = [
@@ -149,7 +144,16 @@ function BridgeChat({ agent, messages, onSend, onReset }) {
             <div className="message-label">
               {message.from === 'agent' ? agent.name : message.from === 'system' ? 'Gateway' : 'You'}
             </div>
-            <p>{message.text}</p>
+            {message.isApproval ? (
+              <InlineApprovalCard
+                approvalId={message.approvalData.approval_id}
+                department={agent.key.toUpperCase()}
+                title={message.approvalData.action || 'Action Required'}
+                summary={message.approvalData.parameters ? JSON.stringify(message.approvalData.parameters) : ''}
+              />
+            ) : (
+              <p>{message.text}</p>
+            )}
           </div>
         ))}
       </div>
@@ -229,6 +233,13 @@ function Registry({ selectedKey, onSelect }) {
 }
 
 function App() {
+  React.useEffect(() => {
+    const session = getPassportSession();
+    if (!session) {
+      window.location.href = `https://passport.axim.us.com/login?redirect_uri=${encodeURIComponent(window.location.href)}&app_id=chatbase-bridge`;
+    }
+  }, []);
+
   const [active, setActive] = useState('overview');
   const [state, setState] = useState(loadBridgeState);
   const agent = useMemo(() => getAgent(state.selectedAgent), [state.selectedAgent]);
@@ -240,8 +251,76 @@ function App() {
     setActive('conversations');
   };
 
-  const sendMessage = (text) => {
-    setState((current) => appendConversation(current, agent.key, text));
+  const sendMessage = async (text) => {
+    setState((current) => {
+      const currentMessages = getConversation(current, agent.key);
+      return {
+        ...current,
+        conversations: {
+          ...current.conversations,
+          [agent.key]: [
+            ...currentMessages,
+            { from: 'user', text }
+          ]
+        }
+      };
+    });
+
+    try {
+      const convKey = `axim.chatbase.conversation.${agent.key}`;
+      const conversationId = sessionStorage.getItem(convKey) || undefined;
+
+      const response = await sendChatMessage({
+        appKey: agent.key,
+        message: text,
+        conversationId
+      });
+
+      if (response.conversationId) {
+        sessionStorage.setItem(convKey, response.conversationId);
+      }
+
+      setState((current) => {
+        const currentMessages = getConversation(current, agent.key);
+        let newMessages = [...currentMessages];
+
+        if (response.state === 'pending_approval' && response.approval_id) {
+          newMessages.push({
+            from: 'system',
+            text: 'Tool call pending approval.',
+            isApproval: true,
+            approvalData: response
+          });
+        } else if (response.reply) {
+          newMessages.push({ from: 'agent', text: response.reply });
+        } else {
+           newMessages.push({ from: 'agent', text: response.message || JSON.stringify(response) });
+        }
+
+        return {
+          ...current,
+          conversations: {
+            ...current.conversations,
+            [agent.key]: newMessages
+          }
+        };
+      });
+
+    } catch (err) {
+      setState((current) => {
+        const currentMessages = getConversation(current, agent.key);
+        return {
+          ...current,
+          conversations: {
+            ...current.conversations,
+            [agent.key]: [
+              ...currentMessages,
+              { from: 'system', text: `Error: ${err.message}` }
+            ]
+          }
+        };
+      });
+    }
   };
 
   const resetChat = () => {
