@@ -22,6 +22,8 @@ import './App.css';
 import { getPassportSession } from './lib/auth';
 import { sendChatMessage } from './services/bridgeClient';
 import InlineApprovalCard from './components/InlineApprovalCard';
+import TelemetryBar from './components/TelemetryBar';
+import PendingApprovalsDrawer from './components/PendingApprovalsDrawer';
 
 function Sidebar({ active, onNavigate, pendingCount }) {
   const items = [
@@ -242,6 +244,8 @@ function App() {
 
   const [active, setActive] = useState('overview');
   const [state, setState] = useState(loadBridgeState);
+  const [isApprovalsDrawerOpen, setApprovalsDrawerOpen] = useState(false);
+  const [creditsUsed, setCreditsUsed] = useState(0);
   const agent = useMemo(() => getAgent(state.selectedAgent), [state.selectedAgent]);
   const messages = getConversation(state, agent.key);
   const pendingCount = state.approvals.filter((item) => item.status === 'Pending').length;
@@ -269,6 +273,8 @@ function App() {
     try {
       const convKey = `axim.chatbase.conversation.${agent.key}`;
       const conversationId = sessionStorage.getItem(convKey) || undefined;
+      // Update mock credits
+      setCreditsUsed(prev => prev + 1);
 
       const response = await sendChatMessage({
         appKey: agent.key,
@@ -340,8 +346,18 @@ function App() {
     <div className="app-shell">
       <Sidebar active={active} onNavigate={setActive} pendingCount={pendingCount} />
       <main className="main-content">
+        <TelemetryBar creditsUsed={creditsUsed} conversationId={sessionStorage.getItem(`axim.chatbase.conversation.${agent.key}`)} pendingCount={pendingCount} onOpenApprovals={() => setApprovalsDrawerOpen(true)} />
         <Topbar active={active} />
         <div className="page-content">
+          {agent.key === 'onyx_direct' && (
+            <div className="bg-cyan-500/10 border border-cyan-500/40 text-cyan-400 p-4 mb-6 rounded flex items-center gap-3">
+              <span className="text-xl">⚡</span>
+              <div>
+                <strong>Out-of-Band Executive Direct Line</strong>
+                <p className="text-sm opacity-80 m-0">Connected to Onyx Mk3 Kernel</p>
+              </div>
+            </div>
+          )}
           <section className="hero">
             <div>
               <span className="eyebrow accent">AXiM CORE · CHATBASE V2</span>
@@ -386,6 +402,7 @@ function App() {
           </div>
         </div>
       </main>
+        <PendingApprovalsDrawer isOpen={isApprovalsDrawerOpen} onClose={() => setApprovalsDrawerOpen(false)} />
     </div>
   );
 }
