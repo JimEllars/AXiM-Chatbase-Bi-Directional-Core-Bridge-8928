@@ -103,6 +103,17 @@ export const agents = [
     level: 'viewer',
     color: '#ec4899',
     status: 'standby'
+  },
+  {
+    key: 'onyx_direct',
+    name: 'Onyx Direct',
+    role: 'Executive Emergency Line',
+    description: 'Direct out-of-band channel to Onyx Mk3 bare-metal kernel during outages or maintenance.',
+    id: 'onyx_direct_mk3',
+    level: 'admin',
+    color: '#06b6d4',
+    status: 'online',
+    badgeColor: 'border-cyan-500/40 text-cyan-400 bg-cyan-500/10'
   }
 ];
 
