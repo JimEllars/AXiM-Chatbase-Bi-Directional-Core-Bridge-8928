@@ -3,7 +3,7 @@ import { getPassportSession } from '../lib/auth';
 const CORE_GATEWAY_URL = import.meta.env.VITE_AXIM_CORE_URL || 'https://core.axim.us.com';
 
 class AgentTunnel {
-  constructor(role, config) {
+    constructor(role, config) {
     this.role = role;
     this.agentId = config.agentId;
     this.botKey = config.botKey;
@@ -12,6 +12,8 @@ class AgentTunnel {
     this.messageQueue = [];
     this.callbacks = new Set();
     this.heartbeatInterval = null;
+    this.backoffDelay = 1000;
+    this.isDraining = false;
   }
 
   async verifyHeartbeat() {
@@ -26,15 +28,78 @@ class AgentTunnel {
 
       if (response) {
          this.status = 'connected';
+         this.backoffDelay = 1000; // reset on success
+         this.drainQueue();
       } else {
          // simulated local fallback latency if actual core is unreachable
          this.latency = Math.floor(Math.random() * 50) + 20;
          this.status = 'degraded';
+         this.backoffDelay = 1000; // reset on degraded but responsive
+         this.drainQueue();
       }
     } catch (err) {
       this.status = 'disconnected';
       this.latency = 0;
+      this.applyBackoff();
     }
+  }
+
+  applyBackoff() {
+     this.stopHeartbeat();
+     const jitter = this.backoffDelay * 0.2 * (Math.random() * 2 - 1);
+     const delay = Math.min(16000, this.backoffDelay + jitter);
+
+     setTimeout(() => {
+        this.verifyHeartbeat();
+        this.startHeartbeat(); // restart polling
+     }, delay);
+
+     this.backoffDelay = Math.min(16000, this.backoffDelay * 1.5);
+  }
+
+  queueMessage(payload) {
+     if (this.messageQueue.length >= 100) {
+         this.messageQueue.shift(); // FIFO
+     }
+     this.messageQueue.push(payload);
+     if (this.status === 'connected' || this.status === 'degraded') {
+         this.drainQueue();
+     }
+  }
+
+  async drainQueue() {
+     if (this.isDraining || this.messageQueue.length === 0) return;
+     this.isDraining = true;
+
+     const session = getPassportSession();
+     const token = session?.access_token || '';
+
+     while (this.messageQueue.length > 0 && (this.status === 'connected' || this.status === 'degraded')) {
+         const payload = this.messageQueue[0];
+         try {
+             const response = await fetch(`${CORE_GATEWAY_URL}/functions/v1/chatbase-gateway`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                  },
+                  body: JSON.stringify({
+                    app_key: this.role.toLowerCase(),
+                    agent_id: this.agentId,
+                    message: payload.message || JSON.stringify(payload),
+                    conversationId: payload.conversationId || undefined
+                  })
+             });
+             if (response.ok) {
+                 this.messageQueue.shift(); // success, remove from queue
+             } else {
+                 break; // pause draining on error
+             }
+         } catch (err) {
+             break; // pause draining on error
+         }
+     }
+     this.isDraining = false;
   }
 
   startHeartbeat(intervalMs = 5000) {
