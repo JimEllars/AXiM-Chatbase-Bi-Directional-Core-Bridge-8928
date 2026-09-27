@@ -49,10 +49,15 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
           let avgLatency = validCount > 0 ? Math.floor(totalLatency / validCount) : 0;
           setLatency(avgLatency);
 
-          if (avgLatency >= 120 || totalBufferCount > 0) {
+          if (totalBufferCount > 0) {
             if (worstStatus === 'connected' || worstStatus === 'polling') {
                 worstStatus = 'degraded';
             }
+          }
+          if (avgLatency >= 150 && avgLatency <= 400) {
+              worstStatus = 'degraded';
+          } else if (avgLatency > 400) {
+              worstStatus = 'disconnected';
           }
 
           setTunnelStatus(worstStatus);
@@ -83,7 +88,7 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
 
   const getStatusIcon = () => {
     switch (tunnelStatus) {
-      case 'connected': return { icon: FiCheckCircle, color: 'text-green-400', label: 'Verified' };
+      case 'connected': return { icon: FiCheckCircle, color: 'text-green-400', label: 'Operational' };
       case 'degraded': return { icon: FiAlertTriangle, color: 'text-amber-400', label: 'Degraded' };
       case 'polling': return { icon: FiZap, color: 'text-blue-400', label: 'Polling' };
       default: return { icon: FiXCircle, color: 'text-red-400', label: 'Disconnected' };

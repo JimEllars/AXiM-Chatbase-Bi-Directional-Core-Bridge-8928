@@ -28,6 +28,7 @@ export async function pingTokenRefresh() {
     if (!session) {
         // Trigger re-auth flow if strict session is lost
         console.warn('Session missing during active polling cycle.');
+        window.dispatchEvent(new CustomEvent('axim.session.event', { detail: { status: 'lost' } }));
     }
     return session !== null;
 }

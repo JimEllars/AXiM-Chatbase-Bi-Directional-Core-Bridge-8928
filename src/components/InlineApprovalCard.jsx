@@ -7,6 +7,7 @@ import { tunnelRegistry } from '../services/agentTunnels';
 export default function InlineApprovalCard({ approvalId, department, title, summary, initialStatus = 'Pending' }) {
     const [status, setStatus] = React.useState(initialStatus);
   const [isProcessing, setIsProcessing] = React.useState(false);
+  const isDispatchingRef = React.useRef(false);
   const [errorBanner, setErrorBanner] = React.useState(null);
 
   const dispatchToTunnel = async (resolvedStatus) => {
@@ -34,6 +35,8 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
 
 
   const handleApprove = async () => {
+    if (isDispatchingRef.current) return;
+    isDispatchingRef.current = true;
     setIsProcessing(true);
     setErrorBanner(null);
     try {
@@ -57,12 +60,15 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
       setErrorBanner('Failed to approve.');
     } finally {
       setIsProcessing(false);
+      isDispatchingRef.current = false;
     }
   };
 
 
 
   const handleReject = async () => {
+    if (isDispatchingRef.current) return;
+    isDispatchingRef.current = true;
     setIsProcessing(true);
     setErrorBanner(null);
     try {
@@ -86,6 +92,7 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
       setErrorBanner('Failed to reject.');
     } finally {
       setIsProcessing(false);
+      isDispatchingRef.current = false;
     }
   };
 
