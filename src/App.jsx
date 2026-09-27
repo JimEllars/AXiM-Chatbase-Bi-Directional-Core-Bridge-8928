@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { supabase } from './lib/supabase';
 import {
   FiActivity,
   FiArrowUpRight,
@@ -245,10 +246,44 @@ function App() {
   const [active, setActive] = useState('overview');
   const [state, setState] = useState(loadBridgeState);
   const [isApprovalsDrawerOpen, setApprovalsDrawerOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [sessionBanner, setSessionBanner] = useState(null);
+
+  const handleSessionEvent = (e) => {
+    if (e.detail.status === 'lost') {
+      setSessionBanner('Session connectivity lost. Retrying...');
+    } else {
+      setSessionBanner(null);
+    }
+  };
+
+  useEffect(() => {
+    window.addEventListener('axim.session.event', handleSessionEvent);
+
+    // Fetch pending count periodically
+    const fetchPendingCount = async () => {
+      try {
+        const { data, error } = await supabase.rpc('get_pending_approvals');
+        if (!error && data) {
+           setPendingCount(data.length);
+        }
+      } catch (err) {
+        // ignore
+      }
+    };
+
+    fetchPendingCount();
+    const intervalId = setInterval(fetchPendingCount, 10000);
+
+    return () => {
+      window.removeEventListener('axim.session.event', handleSessionEvent);
+      clearInterval(intervalId);
+    };
+  }, []);
   const [creditsUsed, setCreditsUsed] = useState(0);
   const agent = useMemo(() => getAgent(state.selectedAgent), [state.selectedAgent]);
   const messages = getConversation(state, agent.key);
-  const pendingCount = state.approvals.filter((item) => item.status === 'Pending').length;
+  // const oldPendingCount = state.approvals.filter((item) => item.status === 'Pending').length;
 
   const selectAgent = (key) => {
     setState((current) => ({ ...current, selectedAgent: key }));
@@ -344,6 +379,7 @@ function App() {
 
   return (
     <div className="app-shell">
+      {sessionBanner && <div className="bg-red-500/90 text-white text-center py-2 text-sm font-semibold z-50 relative">{sessionBanner}</div>}
       <Sidebar active={active} onNavigate={setActive} pendingCount={pendingCount} />
       <main className="main-content">
         <TelemetryBar creditsUsed={creditsUsed} conversationId={sessionStorage.getItem(`axim.chatbase.conversation.${agent.key}`)} pendingCount={pendingCount} onOpenApprovals={() => setApprovalsDrawerOpen(true)} />

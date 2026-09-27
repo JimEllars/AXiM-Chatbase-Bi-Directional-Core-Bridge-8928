@@ -18,3 +18,14 @@ body {
   width: 100%;
   height: 100%;
 }
+
+.app-shell {
+  background-color: theme('colors.zinc.900');
+  color: theme('colors.slate.100');
+}
+.sidebar {
+  border-right: 1px solid theme('colors.zinc.800');
+}
+.telemetry-bar {
+  border-bottom: 1px solid theme('colors.zinc.800');
+}

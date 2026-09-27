@@ -10,9 +10,11 @@ class AgentTunnel {
     this.status = 'disconnected'; // 'connected', 'degraded', 'disconnected', 'polling'
     this.latency = 0;
     this.messageQueue = [];
+    this.initialBackoffDelay = 500;
+    this.maxBackoffDelay = 8000;
     this.callbacks = new Set();
     this.heartbeatInterval = null;
-    this.backoffDelay = 1000;
+    this.backoffDelay = this.initialBackoffDelay;
     this.isDraining = false;
   }
 
@@ -28,13 +30,13 @@ class AgentTunnel {
 
       if (response) {
          this.status = 'connected';
-         this.backoffDelay = 1000; // reset on success
+         this.backoffDelay = this.initialBackoffDelay; // reset on success
          this.drainQueue();
       } else {
          // simulated local fallback latency if actual core is unreachable
          this.latency = Math.floor(Math.random() * 50) + 20;
          this.status = 'degraded';
-         this.backoffDelay = 1000; // reset on degraded but responsive
+         this.backoffDelay = this.initialBackoffDelay; // reset on degraded but responsive
          this.drainQueue();
       }
     } catch (err) {
@@ -47,18 +49,18 @@ class AgentTunnel {
   applyBackoff() {
      this.stopHeartbeat();
      const jitter = this.backoffDelay * 0.2 * (Math.random() * 2 - 1);
-     const delay = Math.min(16000, this.backoffDelay + jitter);
+     const delay = Math.min(this.maxBackoffDelay, this.backoffDelay + jitter);
 
      setTimeout(() => {
         this.verifyHeartbeat();
         this.startHeartbeat(); // restart polling
      }, delay);
 
-     this.backoffDelay = Math.min(16000, this.backoffDelay * 1.5);
+     this.backoffDelay = Math.min(this.maxBackoffDelay, this.backoffDelay * 1.5);
   }
 
   queueMessage(payload) {
-     if (this.messageQueue.length >= 100) {
+     if (this.messageQueue.length >= 50) {
          this.messageQueue.shift(); // FIFO
      }
      this.messageQueue.push(payload);
