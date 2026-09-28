@@ -3,6 +3,7 @@ import { FiX, FiShield, FiAlertTriangle, FiCheck } from 'react-icons/fi';
 import SafeIcon from '../common/SafeIcon';
 import { supabase } from '../lib/supabase';
 import { tunnelRegistry } from '../services/agentTunnels';
+import { sendActionResolution } from '../services/bridgeClient';
 
 export default function PendingApprovalsDrawer({ isOpen, onClose }) {
     const [approvals, setApprovals] = useState([]);
@@ -86,25 +87,17 @@ export default function PendingApprovalsDrawer({ isOpen, onClose }) {
   };
 
   const dispatchToTunnel = async (approvalId, department, resolvedStatus) => {
-    const roleMap = {
-      'CEO': 'ceo',
-      'COO': 'coo',
-      'CTO': 'cto',
-      'CFO': 'cfo'
+    const resolutionPayload = {
+      actionId: approvalId,
+      status: resolvedStatus,
+      timestamp: new Date().toISOString(),
+      resolvedBy: 'current_user_or_system',
+      notes: ''
     };
-    const roleKey = roleMap[department] || 'ceo';
-    const tunnel = tunnelRegistry.getTunnel(roleKey);
-
-    if (tunnel) {
-      try {
-        await tunnel.dispatchWebhookCallback({
-          action_id: approvalId,
-          status: resolvedStatus,
-          timestamp: new Date().toISOString()
-        });
-      } catch (err) {
-        console.warn('Failed to dispatch webhook callback to tunnel:', err);
-      }
+    try {
+      await sendActionResolution(resolutionPayload);
+    } catch (err) {
+      console.warn('Failed to dispatch resolution:', err);
     }
   };
 

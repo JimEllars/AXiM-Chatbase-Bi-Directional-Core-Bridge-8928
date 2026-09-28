@@ -5,7 +5,7 @@ import { createLocalReply, getAgent } from './localBridge';
 const CORE_GATEWAY_URL = import.meta.env.VITE_AXIM_CORE_URL || 'https://core.axim.us.com';
 
 async function fetchWithBackoff(url, options, retries = 3) {
-  let initialDelay = 1000;
+  let currentDelay = 1000;
   for (let i = 0; i <= retries; i++) {
     try {
       const response = await fetch(url, options);
@@ -28,10 +28,10 @@ async function fetchWithBackoff(url, options, retries = 3) {
       return response;
     } catch (err) {
       if (i === retries) throw err;
-      const jitter = initialDelay * 0.2 * (Math.random() * 2 - 1);
-      const delay = Math.min(30000, initialDelay + jitter);
+      const jitter = currentDelay * 0.2 * (Math.random() * 2 - 1);
+      const delay = Math.min(30000, currentDelay + jitter);
       await new Promise(resolve => setTimeout(resolve, delay));
-      initialDelay *= 2;
+      currentDelay = Math.min(30000, currentDelay * 1.5);
     }
   }
 }
@@ -110,4 +110,28 @@ export function listenToTunnel(agentRole, onMessageCallback) {
     return tunnel.onMessage(onMessageCallback);
   }
   return () => {}; // no-op if tunnel not found
+}
+
+export async function sendActionResolution(payload) {
+  const session = getPassportSession();
+  const token = session?.access_token || '';
+
+  // Since we don't have the role in the signature of sendActionResolution, we just broadcast or send to a generic endpoint.
+  // Wait, looking at the previous code, it used to lookup a tunnel based on department.
+  // Actually, sendActionResolution only has the resolution payload according to prompt.
+  // Let's implement it.
+
+  const response = await fetchWithBackoff(`${CORE_GATEWAY_URL}/functions/v1/tunnel-webhook`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to send resolution: ${response.status}`);
+  }
+  return response.json();
 }

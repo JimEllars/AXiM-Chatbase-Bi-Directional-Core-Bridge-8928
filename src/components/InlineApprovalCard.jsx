@@ -3,6 +3,7 @@ import { FiShield } from 'react-icons/fi';
 import SafeIcon from '../common/SafeIcon';
 import { supabase } from '../lib/supabase';
 import { tunnelRegistry } from '../services/agentTunnels';
+import { sendActionResolution } from '../services/bridgeClient';
 
 export default function InlineApprovalCard({ approvalId, department, title, summary, initialStatus = 'Pending' }) {
     const [status, setStatus] = React.useState(initialStatus);
@@ -11,30 +12,17 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
   const [errorBanner, setErrorBanner] = React.useState(null);
 
   const dispatchToTunnel = async (resolvedStatus) => {
-    const roleMap = {
-      'CEO': 'ceo',
-      'COO': 'coo',
-      'CTO': 'cto',
-      'CFO': 'cfo'
+    const resolutionPayload = {
+      actionId: approvalId,
+      status: resolvedStatus,
+      timestamp: new Date().toISOString(),
+      resolvedBy: 'current_user_or_system',
+      notes: ''
     };
-    const roleKey = roleMap[department] || 'ceo';
-    const tunnel = tunnelRegistry.getTunnel(roleKey);
-
-    if (tunnel) {
-      try {
-        if (tunnel.status === 'disconnected') {
-            tunnel.queueMessage({ type: 'webhook_callback', action_id: approvalId, status: resolvedStatus, timestamp: new Date().toISOString() });
-        } else {
-            await tunnel.dispatchWebhookCallback({
-          action_id: approvalId,
-          status: resolvedStatus,
-          timestamp: new Date().toISOString()
-        });
-        }
-      } catch (err) {
-        console.warn('Failed to dispatch webhook callback to tunnel:', err);
-        tunnel.queueMessage({ type: 'webhook_callback', action_id: approvalId, status: resolvedStatus, timestamp: new Date().toISOString() });
-      }
+    try {
+      await sendActionResolution(resolutionPayload);
+    } catch (err) {
+      console.warn('Failed to dispatch resolution:', err);
     }
   };
 
