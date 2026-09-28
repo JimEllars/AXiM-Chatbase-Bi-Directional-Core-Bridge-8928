@@ -5,7 +5,7 @@ import { createLocalReply, getAgent } from './localBridge';
 const CORE_GATEWAY_URL = import.meta.env.VITE_AXIM_CORE_URL || 'https://core.axim.us.com';
 
 async function fetchWithBackoff(url, options, retries = 3) {
-  let initialDelay = 500;
+  let initialDelay = 1000;
   for (let i = 0; i <= retries; i++) {
     try {
       const response = await fetch(url, options);
@@ -29,7 +29,7 @@ async function fetchWithBackoff(url, options, retries = 3) {
     } catch (err) {
       if (i === retries) throw err;
       const jitter = initialDelay * 0.2 * (Math.random() * 2 - 1);
-      const delay = Math.min(8000, initialDelay + jitter);
+      const delay = Math.min(30000, initialDelay + jitter);
       await new Promise(resolve => setTimeout(resolve, delay));
       initialDelay *= 2;
     }

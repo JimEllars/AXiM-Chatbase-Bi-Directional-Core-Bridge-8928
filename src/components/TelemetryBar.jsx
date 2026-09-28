@@ -13,7 +13,7 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
 
   useEffect(() => {
     let lastUpdate = 0;
-    const pollingInterval = 15000; // Update UI every 1s
+    const pollingInterval = 1000; // Update UI every 1s
 
     const updateTelemetry = (timestamp) => {
       if (timestamp - lastUpdate > pollingInterval) {
@@ -99,11 +99,11 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
 
   const getStatusIcon = () => {
     switch (tunnelStatus) {
-      case 'connected': return { icon: FiCheckCircle, color: 'text-green-400', label: 'Operational' };
+      case 'connected': return { icon: FiCheckCircle, color: 'text-emerald-400', label: 'Operational' };
       case 'degraded': return { icon: FiAlertTriangle, color: 'text-amber-400', label: 'Degraded' };
       case 'polling': return { icon: FiZap, color: 'text-blue-400', label: 'Polling' };
       case 'reconnecting': return { icon: FiZap, color: 'text-blue-400', label: 'Reconnecting' };
-      default: return { icon: FiXCircle, color: 'text-red-400', label: 'Offline' };
+      default: return { icon: FiXCircle, color: 'text-rose-400', label: 'Offline' };
     }
   };
 
@@ -113,7 +113,7 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
     <div className="telemetry-bar">
       <div className="telemetry-group">
         <div className="telemetry-item">
-          <span className={`live-pulse ${tunnelStatus === 'connected' ? 'bg-green-500' : tunnelStatus === 'degraded' ? 'bg-amber-500' : 'bg-red-500'}`}></span>
+          <span className={`live-pulse ${tunnelStatus === 'connected' ? 'bg-emerald-500' : tunnelStatus === 'degraded' ? 'bg-amber-500' : 'bg-rose-500'}`}></span>
           <span>Core Edge Uplink {activeTunnels > 0 ? `(${activeTunnels} active)` : ''} &middot; Latency:</span>
           <strong className="font-mono">{latency > 0 ? `${latency}ms` : '---'}</strong>
         </div>
