@@ -4,6 +4,38 @@ import { createLocalReply, getAgent } from './localBridge';
 
 const CORE_GATEWAY_URL = import.meta.env.VITE_AXIM_CORE_URL || 'https://core.axim.us.com';
 
+async function fetchWithBackoff(url, options, retries = 3) {
+  let initialDelay = 500;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const response = await fetch(url, options);
+
+      if (!response.ok) {
+          if (response.status === 401 && i === 0) {
+            // Attempt a single token refresh intercept (placeholder)
+            const session = await import('../lib/auth').then(m => m.pingTokenRefresh());
+            if (session) {
+              const newToken = (await import('../lib/auth').then(m => m.getPassportSession()))?.access_token || '';
+              options.headers = { ...options.headers, 'Authorization': `Bearer ${newToken}` };
+              return await fetch(url, options);
+            }
+          }
+
+          if (response.status >= 500 && i < retries) {
+             throw new Error('Server Error ' + response.status); // throw to trigger retry
+          }
+      }
+      return response;
+    } catch (err) {
+      if (i === retries) throw err;
+      const jitter = initialDelay * 0.2 * (Math.random() * 2 - 1);
+      const delay = Math.min(8000, initialDelay + jitter);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      initialDelay *= 2;
+    }
+  }
+}
+
 export async function sendChatMessage({ appKey, message, conversationId }) {
   // Backwards compatibility layer
   return dispatchAgentMessage(appKey, { message }, { conversationId });
@@ -30,7 +62,7 @@ export async function dispatchAgentMessage(agentRole, messagePayload, contextMet
   }
 
   try {
-    const response = await fetch(`${CORE_GATEWAY_URL}/functions/v1/chatbase-gateway`, {
+    const response = await fetchWithBackoff(`${CORE_GATEWAY_URL}/functions/v1/chatbase-gateway`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

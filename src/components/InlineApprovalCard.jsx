@@ -34,18 +34,20 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
   };
 
 
+
   const handleApprove = async () => {
     if (isDispatchingRef.current) return;
     isDispatchingRef.current = true;
     setIsProcessing(true);
     setErrorBanner(null);
+    const previousStatus = status;
+    setStatus('Approved'); // Optimistic
     try {
       const { error } = await supabase.rpc('resolve_hitl_action_rpc', {
         p_action_id: approvalId,
         p_status: 'Approved'
       });
       if (error) throw error;
-      setStatus('Approved');
 
       await supabase.from('action_approvals_log').insert([{
         action_id: approvalId,
@@ -57,6 +59,7 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
       await dispatchToTunnel('Approved');
     } catch (err) {
       console.error('Failed to approve action:', err);
+      setStatus(previousStatus); // Revert
       setErrorBanner('Failed to approve.');
     } finally {
       setIsProcessing(false);
@@ -66,18 +69,20 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
 
 
 
+
   const handleReject = async () => {
     if (isDispatchingRef.current) return;
     isDispatchingRef.current = true;
     setIsProcessing(true);
     setErrorBanner(null);
+    const previousStatus = status;
+    setStatus('Rejected'); // Optimistic
     try {
       const { error } = await supabase.rpc('resolve_hitl_action_rpc', {
         p_action_id: approvalId,
         p_status: 'Rejected'
       });
       if (error) throw error;
-      setStatus('Rejected');
 
       await supabase.from('action_approvals_log').insert([{
         action_id: approvalId,
@@ -89,6 +94,7 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
       await dispatchToTunnel('Rejected');
     } catch (err) {
       console.error('Failed to reject action:', err);
+      setStatus(previousStatus); // Revert
       setErrorBanner('Failed to reject.');
     } finally {
       setIsProcessing(false);

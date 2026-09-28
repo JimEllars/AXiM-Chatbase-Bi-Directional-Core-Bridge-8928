@@ -13,7 +13,7 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
 
   useEffect(() => {
     let lastUpdate = 0;
-    const pollingInterval = 1000; // Update UI every 1s
+    const pollingInterval = 15000; // Update UI every 1s
 
     const updateTelemetry = (timestamp) => {
       if (timestamp - lastUpdate > pollingInterval) {
@@ -71,7 +71,18 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
 
     animationRef.current = requestAnimationFrame(updateTelemetry);
 
+
+    const handleTelemetryEvent = (e) => {
+      // Force immediate update if we receive a circuit breaker event
+      if (e.detail?.status === 'degraded') {
+         setTunnelStatus('degraded');
+      }
+    };
+    window.addEventListener('axim.telemetry.event', handleTelemetryEvent);
+
     return () => {
+      window.removeEventListener('axim.telemetry.event', handleTelemetryEvent);
+
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
@@ -91,7 +102,8 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
       case 'connected': return { icon: FiCheckCircle, color: 'text-green-400', label: 'Operational' };
       case 'degraded': return { icon: FiAlertTriangle, color: 'text-amber-400', label: 'Degraded' };
       case 'polling': return { icon: FiZap, color: 'text-blue-400', label: 'Polling' };
-      default: return { icon: FiXCircle, color: 'text-red-400', label: 'Disconnected' };
+      case 'reconnecting': return { icon: FiZap, color: 'text-blue-400', label: 'Reconnecting' };
+      default: return { icon: FiXCircle, color: 'text-red-400', label: 'Offline' };
     }
   };
 
@@ -102,7 +114,7 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
       <div className="telemetry-group">
         <div className="telemetry-item">
           <span className={`live-pulse ${tunnelStatus === 'connected' ? 'bg-green-500' : tunnelStatus === 'degraded' ? 'bg-amber-500' : 'bg-red-500'}`}></span>
-          <span>Core Edge Uplink {activeTunnels > 0 ? `(${activeTunnels} active)` : ''}</span>
+          <span>Core Edge Uplink {activeTunnels > 0 ? `(${activeTunnels} active)` : ''} &middot; Latency:</span>
           <strong className="font-mono">{latency > 0 ? `${latency}ms` : '---'}</strong>
         </div>
         <div className="telemetry-divider"></div>
