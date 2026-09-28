@@ -11,6 +11,36 @@ export default function PendingApprovalsDrawer({ isOpen, onClose }) {
   const [errorBanner, setErrorBanner] = useState(null);
 
 
+
+  useEffect(() => {
+    const handleRealtimeUpdate = (payload) => {
+       fetchApprovals(); // Simplest way to sync state is re-fetching.
+    };
+
+    const channel = supabase
+      .channel('public:agent_approvals')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agent_approvals' }, (payload) => {
+        handleRealtimeUpdate(payload);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    } else {
+      window.removeEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   useEffect(() => {
     if (isOpen) {
       // Hydrate from cache first
@@ -131,7 +161,7 @@ export default function PendingApprovalsDrawer({ isOpen, onClose }) {
 
   return (
     <div className="drawer-overlay" onClick={onClose}>
-      <div className="drawer-panel" onClick={e => e.stopPropagation()}>
+      <div className="drawer-panel bg-slate-900/80 backdrop-blur-md border-l border-slate-800" onClick={e => e.stopPropagation()}>
         <div className="drawer-header">
           <div className="drawer-title">
             <SafeIcon icon={FiShield} className="text-amber-400" />

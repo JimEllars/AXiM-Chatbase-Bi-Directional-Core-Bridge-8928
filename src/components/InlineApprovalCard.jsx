@@ -22,13 +22,18 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
 
     if (tunnel) {
       try {
-        await tunnel.dispatchWebhookCallback({
+        if (tunnel.status === 'disconnected') {
+            tunnel.queueMessage({ type: 'webhook_callback', action_id: approvalId, status: resolvedStatus, timestamp: new Date().toISOString() });
+        } else {
+            await tunnel.dispatchWebhookCallback({
           action_id: approvalId,
           status: resolvedStatus,
           timestamp: new Date().toISOString()
         });
+        }
       } catch (err) {
         console.warn('Failed to dispatch webhook callback to tunnel:', err);
+        tunnel.queueMessage({ type: 'webhook_callback', action_id: approvalId, status: resolvedStatus, timestamp: new Date().toISOString() });
       }
     }
   };
@@ -104,7 +109,7 @@ export default function InlineApprovalCard({ approvalId, department, title, summ
 
 
   return (
-    <div className={`approval-card inline-card ${status === 'Approved' ? 'approved' : status === 'Rejected' ? 'rejected' : ''}`}>
+    <div className={`approval-card inline-card bg-slate-900/80 backdrop-blur-md border border-slate-800 ${status === 'Approved' ? 'approved' : status === 'Rejected' ? 'rejected' : ''}`}>
       <div className={`approval-icon ${status === 'Pending' ? 'amber' : status === 'Approved' ? 'emerald' : 'red'}`}>
         <SafeIcon icon={FiShield} />
       </div>

@@ -111,19 +111,37 @@ class AgentTunnel {
      while (this.messageQueue.length > 0 && this.status === 'connected') {
          const payload = this.messageQueue[0];
          try {
-             const response = await fetch(`${CORE_GATEWAY_URL}/functions/v1/chatbase-gateway`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                  },
-                  body: JSON.stringify({
-                    app_key: this.role.toLowerCase(),
-                    agent_id: this.agentId,
-                    message: payload.message || JSON.stringify(payload),
-                    conversationId: payload.conversationId || undefined
-                  })
-             });
+             let response;
+             if (payload.type === 'webhook_callback') {
+                 response = await fetch(`${CORE_GATEWAY_URL}/functions/v1/tunnel-webhook`, {
+                     method: 'POST',
+                     headers: {
+                       'Content-Type': 'application/json',
+                       'Authorization': `Bearer ${token}`
+                     },
+                     body: JSON.stringify({
+                       agent_role: this.role,
+                       agent_id: this.agentId,
+                       action_id: payload.action_id,
+                       status: payload.status,
+                       timestamp: payload.timestamp
+                     })
+                 });
+             } else {
+                 response = await fetch(`${CORE_GATEWAY_URL}/functions/v1/chatbase-gateway`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                      },
+                      body: JSON.stringify({
+                        app_key: this.role.toLowerCase(),
+                        agent_id: this.agentId,
+                        message: payload.message || JSON.stringify(payload),
+                        conversationId: payload.conversationId || undefined
+                      })
+                 });
+             }
              if (response.ok) {
                  this.messageQueue.shift(); // success, remove from queue
                  this.saveQueue();
