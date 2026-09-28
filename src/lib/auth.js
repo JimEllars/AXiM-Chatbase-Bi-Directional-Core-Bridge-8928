@@ -22,6 +22,17 @@ export function getPassportSession() {
 }
 
 export async function pingTokenRefresh() {
+    // Attempt proactive token refresh via supabase if possible
+    try {
+        const { supabase } = await import('./supabase.js');
+        const { data, error } = await supabase.auth.getSession();
+        if (!data.session || error) {
+            await supabase.auth.refreshSession();
+        }
+    } catch (e) {
+        // ignore
+    }
+
     // Implement token refresh cycle if necessary, currently placeholder.
     // Heavy agent polling loops will call getPassportSession, which acts as a minimal check.
     const session = getPassportSession();

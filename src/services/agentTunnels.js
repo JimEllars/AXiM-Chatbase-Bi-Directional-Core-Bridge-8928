@@ -15,7 +15,29 @@ class AgentTunnel {
     this.callbacks = new Set();
     this.heartbeatInterval = null;
     this.backoffDelay = this.initialBackoffDelay;
+    this.consecutiveFailures = 0;
     this.isDraining = false;
+    this.loadQueue();
+  }
+
+
+  saveQueue() {
+    try {
+      localStorage.setItem(`axim.tunnel.${this.role}.queue`, JSON.stringify(this.messageQueue));
+    } catch (e) {
+      console.warn('Failed to save queue to localStorage', e);
+    }
+  }
+
+  loadQueue() {
+    try {
+      const stored = localStorage.getItem(`axim.tunnel.${this.role}.queue`);
+      if (stored) {
+        this.messageQueue = JSON.parse(stored);
+      }
+    } catch (e) {
+      console.warn('Failed to load queue from localStorage', e);
+    }
   }
 
   async verifyHeartbeat() {
@@ -31,16 +53,25 @@ class AgentTunnel {
       if (response) {
          this.status = 'connected';
          this.backoffDelay = this.initialBackoffDelay; // reset on success
+         this.consecutiveFailures = 0;
          this.drainQueue();
       } else {
          // simulated local fallback latency if actual core is unreachable
          this.latency = Math.floor(Math.random() * 50) + 20;
          this.status = 'degraded';
          this.backoffDelay = this.initialBackoffDelay; // reset on degraded but responsive
+         this.consecutiveFailures = 0;
          this.drainQueue();
       }
     } catch (err) {
-      this.status = 'disconnected';
+      this.consecutiveFailures++;
+      if (this.consecutiveFailures >= 5) {
+        this.status = 'degraded';
+        // emit telemetry event
+        window.dispatchEvent(new CustomEvent('axim.telemetry.event', { detail: { role: this.role, status: 'degraded' } }));
+      } else {
+        this.status = 'disconnected';
+      }
       this.latency = 0;
       this.applyBackoff();
     }
@@ -56,7 +87,7 @@ class AgentTunnel {
         this.startHeartbeat(); // restart polling
      }, delay);
 
-     this.backoffDelay = Math.min(this.maxBackoffDelay, this.backoffDelay * 1.5);
+     this.backoffDelay = Math.min(this.maxBackoffDelay, this.backoffDelay * 2);
   }
 
   queueMessage(payload) {
@@ -64,7 +95,8 @@ class AgentTunnel {
          this.messageQueue.shift(); // FIFO
      }
      this.messageQueue.push(payload);
-     if (this.status === 'connected' || this.status === 'degraded') {
+     this.saveQueue();
+     if (this.status === 'connected') {
          this.drainQueue();
      }
   }
@@ -76,7 +108,7 @@ class AgentTunnel {
      const session = getPassportSession();
      const token = session?.access_token || '';
 
-     while (this.messageQueue.length > 0 && (this.status === 'connected' || this.status === 'degraded')) {
+     while (this.messageQueue.length > 0 && this.status === 'connected') {
          const payload = this.messageQueue[0];
          try {
              const response = await fetch(`${CORE_GATEWAY_URL}/functions/v1/chatbase-gateway`, {
@@ -94,6 +126,7 @@ class AgentTunnel {
              });
              if (response.ok) {
                  this.messageQueue.shift(); // success, remove from queue
+                 this.saveQueue();
              } else {
                  break; // pause draining on error
              }
