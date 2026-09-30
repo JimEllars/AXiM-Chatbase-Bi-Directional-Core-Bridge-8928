@@ -19,8 +19,8 @@ export default function PendingApprovalsDrawer({ isOpen, onClose }) {
     };
 
     const channel = supabase
-      .channel('public:agent_approvals')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'agent_approvals' }, (payload) => {
+      .channel('public:hitl_audit_logs')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hitl_audit_logs' }, (payload) => {
         handleRealtimeUpdate(payload);
       })
       .subscribe();
@@ -126,12 +126,14 @@ export default function PendingApprovalsDrawer({ isOpen, onClose }) {
       if (error) {
         throw error;
       } else {
-        await supabase.from('action_approvals_log').insert([{
-          action_id: id,
-          department: department,
-          status: status,
-          executed_at: new Date().toISOString()
-        }]);
+        try {
+          await supabase.from('hitl_audit_logs').update({
+            status: status,
+            resolved_at: new Date().toISOString()
+          }).eq('id', id);
+        } catch (logErr) {
+          console.warn('[HITL] Status update logging skipped:', logErr.message);
+        }
 
         await dispatchToTunnel(id, department, status);
       }

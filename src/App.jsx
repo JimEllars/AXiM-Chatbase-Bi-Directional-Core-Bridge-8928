@@ -1,5 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { supabase } from './lib/supabase';
+import { sendActionResolution } from './services/bridgeClient';
+import { tunnelRegistry } from './services/agentTunnels';
 import {
   FiActivity,
   FiArrowUpRight,
@@ -193,24 +195,33 @@ function ActivityFeed({ events }) {
   );
 }
 
-function ApprovalQueue({ approvals, onUpdate }) {
+function ApprovalQueue({ approvals, onUpdate, tab, setTab }) {
+  const filteredApprovals = tab ? approvals.filter(a => (a.status || 'Pending') === tab) : approvals;
   return (
     <section className="panel approval-panel">
       <div className="panel-heading">
         <div>
           <span className="eyebrow">Human-in-the-loop</span>
-          <h2>Approval queue <b className="count">{approvals.filter((item) => item.status === 'Pending').length}</b></h2>
+          <h2>Approval queue <b className="count">{approvals.filter((item) => (item.status || 'Pending') === 'Pending').length}</b></h2>
         </div>
-        <span className="text-button">Review actions <SafeIcon icon={FiArrowUpRight} /></span>
+        {setTab && (
+          <div className="flex gap-2">
+            <button className={`text-sm px-2 py-1 rounded ${tab === 'Pending' ? 'bg-slate-700 text-white' : 'text-slate-400'}`} onClick={() => setTab('Pending')}>Pending</button>
+            <button className={`text-sm px-2 py-1 rounded ${tab === 'Approved' ? 'bg-slate-700 text-white' : 'text-slate-400'}`} onClick={() => setTab('Approved')}>Approved</button>
+            <button className={`text-sm px-2 py-1 rounded ${tab === 'Rejected' ? 'bg-slate-700 text-white' : 'text-slate-400'}`} onClick={() => setTab('Rejected')}>Rejected</button>
+          </div>
+        )}
       </div>
-      {approvals.map((approval) => (
+      {filteredApprovals.length === 0 ? (
+        <div className="text-slate-400 p-4 text-center">No {tab} actions</div>
+      ) : filteredApprovals.map((approval) => (
         <div className="approval-card" key={approval.id}>
           <div className={`approval-icon ${approval.status === 'Approved' ? 'amber' : ''}`}><SafeIcon icon={FiShield} /></div>
-          <div><strong>{approval.title}</strong><span>{approval.department} · {approval.detail}</span></div>
-          {approval.status === 'Pending' ? (
+          <div><strong>{approval.title || approval.action}</strong><span>{approval.department || 'SYSTEM'} · {approval.detail || approval.justification}</span></div>
+          {(approval.status || 'Pending') === 'Pending' ? (
             <div className="approval-actions">
-              <button className="review-button" onClick={() => onUpdate(approval.id, 'Approved')}>Approve</button>
-              <button className="review-button reject" onClick={() => onUpdate(approval.id, 'Rejected')}>Reject</button>
+              <button className="review-button" onClick={() => onUpdate(approval.id, approval.department || 'SYSTEM', 'Approved')}>Approve & Execute</button>
+              <button className="review-button reject" onClick={() => onUpdate(approval.id, approval.department || 'SYSTEM', 'Rejected')}>Reject</button>
             </div>
           ) : <span className="approval-status">{approval.status}</span>}
         </div>
@@ -248,6 +259,11 @@ function App() {
   const [state, setState] = useState(loadBridgeState);
   const [isApprovalsDrawerOpen, setApprovalsDrawerOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [globalApprovals, setGlobalApprovals] = useState([]);
+  const [ledgerEvents, setLedgerEvents] = useState([]);
+  const [approvalTab, setApprovalTab] = useState('Pending');
+  const [tunnelStatus, setTunnelStatus] = useState('disconnected');
+  const [latency, setLatency] = useState(0);
   const [sessionBanner, setSessionBanner] = useState(null);
 
   const handleSessionEvent = (e) => {
@@ -266,19 +282,79 @@ function App() {
       try {
         const { data, error } = await supabase.rpc('get_pending_approvals');
         if (!error && data) {
-           setPendingCount(data.length);
+           setPendingCount(data.filter(a => a.status === 'Pending').length);
+           setGlobalApprovals(data);
         }
       } catch (err) {
         // ignore
       }
     };
 
+    const fetchLedgerEvents = async () => {
+      try {
+        const { data, error } = await supabase.from('hitl_audit_logs')
+          .select('id, action, action_required, status, target_department, timestamp')
+          .order('timestamp', { ascending: false })
+          .limit(50);
+        if (!error && data) {
+          setLedgerEvents(data.map(d => ({
+             id: d.id,
+             title: d.action || 'System Action',
+             detail: d.action_required ? 'Approval Required' : 'Auto-executed',
+             time: new Date(d.timestamp).toLocaleTimeString(),
+             status: d.status.toLowerCase() === 'pending' ? 'pending' : 'approved'
+          })));
+        }
+      } catch (err) { /* ignore */ }
+    };
+
     fetchPendingCount();
-    const intervalId = setInterval(fetchPendingCount, 10000);
+    fetchLedgerEvents();
+    const intervalId = setInterval(() => { fetchPendingCount(); fetchLedgerEvents(); }, 10000);
+
+    const updateTelemetry = () => {
+      const tunnels = tunnelRegistry.getAllTunnels();
+      if (tunnels.length > 0) {
+        let totalLatency = 0;
+        let validCount = 0;
+        let worstStatus = 'connected';
+
+        tunnels.forEach(t => {
+          if (t.latency > 0) {
+            totalLatency += t.latency;
+            validCount++;
+          }
+          if (t.status === 'disconnected') worstStatus = 'disconnected';
+          else if (t.status === 'degraded' && worstStatus !== 'disconnected') worstStatus = 'degraded';
+          else if (t.status === 'polling' && worstStatus === 'connected') worstStatus = 'polling';
+        });
+
+        let avgLatency = validCount > 0 ? Math.floor(totalLatency / validCount) : 0;
+        setLatency(avgLatency);
+
+        if (avgLatency >= 120 && avgLatency <= 350) worstStatus = 'degraded';
+        else if (avgLatency > 350) worstStatus = 'disconnected';
+
+        setTunnelStatus(worstStatus);
+      }
+    };
+    const telemetryIntervalId = setInterval(updateTelemetry, 1000);
+    updateTelemetry();
+
+
+    const channel = supabase
+      .channel('public:hitl_audit_logs_main')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hitl_audit_logs' }, () => {
+        fetchPendingCount();
+        fetchLedgerEvents();
+      })
+      .subscribe();
 
     return () => {
+      supabase.removeChannel(channel);
       window.removeEventListener('axim.session.event', handleSessionEvent);
       clearInterval(intervalId);
+      clearInterval(telemetryIntervalId);
     };
   }, []);
   const [creditsUsed, setCreditsUsed] = useState(0);
@@ -309,9 +385,6 @@ function App() {
     try {
       const convKey = `axim.chatbase.conversation.${agent.key}`;
       const conversationId = sessionStorage.getItem(convKey) || undefined;
-      // Update mock credits
-      setCreditsUsed(prev => prev + 1);
-
       const response = await sendChatMessage({
         appKey: agent.key,
         message: text,
@@ -321,6 +394,9 @@ function App() {
       if (response.conversationId) {
         sessionStorage.setItem(convKey, response.conversationId);
       }
+
+      const edgeCredits = response.credits || response.metadata?.usage?.credits || 1;
+      setCreditsUsed(prev => prev + Number(edgeCredits));
 
       setState((current) => {
         const currentMessages = getConversation(current, agent.key);
@@ -369,8 +445,32 @@ function App() {
     setState((current) => resetConversation(current, agent.key));
   };
 
-  const handleApproval = (id, status) => {
-    setState((current) => updateApproval(current, id, status));
+  const handleApproval = async (id, department, status) => {
+    try {
+      const { error } = await supabase.rpc('resolve_hitl_action_rpc', {
+        p_action_id: id,
+        p_status: status
+      });
+      if (error) throw error;
+
+      try {
+        await supabase.from('hitl_audit_logs').update({ status, resolved_at: new Date().toISOString() }).eq('id', id);
+      } catch (e) { /* ignore */ }
+
+      await sendActionResolution({
+        actionId: id,
+        status,
+        timestamp: new Date().toISOString(),
+        resolvedBy: 'current_user_or_system'
+      });
+
+      // Update local globalApprovals state optimistically
+      setGlobalApprovals(prev => prev.map(a => a.id === id ? { ...a, status } : a));
+      setPendingCount(prev => Math.max(0, prev - 1));
+
+    } catch (err) {
+      console.error('Failed to resolve action:', err);
+    }
   };
 
   const showOverview = active === 'overview';
@@ -384,7 +484,7 @@ function App() {
       <Sidebar active={active} onNavigate={setActive} pendingCount={pendingCount} />
       <main className="main-content">
         <TelemetryBar creditsUsed={creditsUsed} conversationId={sessionStorage.getItem(`axim.chatbase.conversation.${agent.key}`)} pendingCount={pendingCount} onOpenApprovals={() => setApprovalsDrawerOpen(true)} />
-        <Topbar active={active} />
+        <Topbar active={active} tunnelStatus={tunnelStatus} />
         <div className="page-content">
           {agent.key === 'onyx_direct' && (
             <div className="bg-cyan-500/10 border border-cyan-500/40 text-cyan-400 p-4 mb-6 rounded flex items-center gap-3">
@@ -408,10 +508,10 @@ function App() {
 
           {showOverview && (
             <div className="stats-grid">
-              <StatCard icon={FiActivity} label="Gateway status" value="Preview" detail="Backend not connected" tone="green" />
-              <StatCard icon={FiMessageSquare} label="Active threads" value={Object.keys(state.conversations).length || '01'} detail="Stored in this browser" tone="purple" />
+              <StatCard icon={FiActivity} label="Gateway status" value={tunnelStatus === 'connected' ? 'Operational' : tunnelStatus === 'degraded' ? 'Degraded' : 'Offline'} detail={`${latency > 0 ? latency + 'ms latency' : 'Core edge uplink'}`} tone={tunnelStatus === 'connected' ? 'green' : tunnelStatus === 'degraded' ? 'amber' : 'red'} />
+              <StatCard icon={FiMessageSquare} label="Active threads" value={String(Object.keys(state.conversations).length).padStart(2, '0')} detail="Stored in this browser" tone="purple" />
               <StatCard icon={FiShield} label="Pending approvals" value={String(pendingCount).padStart(2, '0')} detail="Local review queue" tone="amber" />
-              <StatCard icon={FiZap} label="Credits used" value="—" detail="Available after connection" tone="blue" />
+              <StatCard icon={FiZap} label="Credits used" value={creditsUsed} detail="Active session usage" tone="blue" />
             </div>
           )}
 
@@ -422,20 +522,20 @@ function App() {
               <BridgeChat agent={agent} messages={messages} onSend={sendMessage} onReset={resetChat} />
               <div className="side-panels">
                 <ActivityFeed events={state.events} />
-                {showApprovals && <ApprovalQueue approvals={state.approvals.slice(0, 2)} onUpdate={handleApproval} />}
+                {showApprovals && <ApprovalQueue approvals={(globalApprovals.length > 0 ? globalApprovals : state.approvals).slice(0, 2)} onUpdate={handleApproval} />}
               </div>
             </div>
           )}
 
           {active === 'approvals' && (
-            <ApprovalQueue approvals={state.approvals} onUpdate={handleApproval} />
+            <ApprovalQueue approvals={globalApprovals.length > 0 ? globalApprovals : state.approvals} onUpdate={handleApproval} tab={approvalTab} setTab={setApprovalTab} />
           )}
 
-          {active === 'ledger' && <ActivityFeed events={state.events} />}
+          {active === 'ledger' && <ActivityFeed events={ledgerEvents.length > 0 ? ledgerEvents : state.events} />}
 
           <div className="preview-note">
             <SafeIcon icon={FiDatabase} />
-            <span><strong>Local bridge preview</strong> · Conversations, approvals, agent selection, and telemetry persist in this browser. Connect a backend before enabling live Chatbase, RBAC, or server-side HITL writes.</span>
+            <span><strong>AXiM Core Bridge</strong> · Authenticated edge gateway active with Human-In-The-Loop write protection.</span>
           </div>
         </div>
       </main>
