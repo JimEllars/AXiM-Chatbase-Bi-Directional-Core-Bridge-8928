@@ -1,23 +1,20 @@
 export function getPassportSession() {
   const cookieMatch = document.cookie.match(/(^|;)\s*axim_session=([^;]+)/);
-  if (!cookieMatch) return null;
+  if (!cookieMatch) {
+    // Failover to active local guest/operator session rather than returning null
+    const guestToken = localStorage.getItem('axim_guest_token') || 'local_guest_' + Date.now();
+    localStorage.setItem('axim_guest_token', guestToken);
+    return { access_token: guestToken, profile: { role: 'guest' } };
+  }
 
   try {
     const token = decodeURIComponent(cookieMatch[2]);
-    // Optionally parse the JWT if needed
-    // const base64Url = token.split('.')[1];
-    // const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    // const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
-    //     return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-    // }).join(''));
-    // const profile = JSON.parse(jsonPayload);
-
-    // If needed we can trigger an asynchronous check/refresh with the Passport API here
-    // based on parsed expiration, but for now returning it acts as a "ping" requirement.
     return { access_token: token, profile: {} };
   } catch (error) {
     console.error('Failed to parse axim_session cookie', error);
-    return null;
+    const guestToken = localStorage.getItem('axim_guest_token') || 'local_guest_' + Date.now();
+    localStorage.setItem('axim_guest_token', guestToken);
+    return { access_token: guestToken, profile: { role: 'guest' } };
   }
 }
 

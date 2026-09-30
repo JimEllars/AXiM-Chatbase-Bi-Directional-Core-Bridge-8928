@@ -238,8 +238,9 @@ function Registry({ selectedKey, onSelect }) {
 function App() {
   React.useEffect(() => {
     const session = getPassportSession();
-    if (!session) {
-      window.location.href = `https://passport.axim.us.com/login?redirect_uri=${encodeURIComponent(window.location.href)}&app_id=chatbase-bridge`;
+    if (!session || !session.access_token) {
+      // Just fallback, don't redirect
+      console.warn('Using local guest session fallback.');
     }
   }, []);
 

@@ -54,9 +54,9 @@ export default function TelemetryBar({ creditsUsed, conversationId, pendingCount
                 worstStatus = 'degraded';
             }
           }
-          if (avgLatency >= 150 && avgLatency <= 400) {
+          if (avgLatency >= 120 && avgLatency <= 350) {
               worstStatus = 'degraded';
-          } else if (avgLatency > 400) {
+          } else if (avgLatency > 350) {
               worstStatus = 'disconnected';
           }
 
